@@ -215,7 +215,34 @@ def run_pipeline(project, variables, trigger, play_jobs=(), ref=None):
     if play_jobs:
         ctx = contextvars.copy_context()           # manual jobs are played with the same user's token
         threading.Thread(target=ctx.run, args=(auto_play, project, p["id"], list(play_jobs)), daemon=True).start()
+    ctx = contextvars.copy_context()               # the pipeline is polled with the same user's token
+    threading.Thread(target=ctx.run, args=(scan_after_pipeline, project, p["id"], ref), daemon=True).start()
     return p
+
+
+def scan_after_pipeline(project, pipeline_id, ref, timeout=7200):
+    """Wait until the pipeline has finished, then run the TYPO3 health check (t3monitor) of the deployed instance:
+    the production branch -> Production, any other branch -> Staging. Skipped if that instance is not set up."""
+    from .t3monitor import t3m_cfg, t3m_fetch, t3m_key   # lazy: t3monitor is not needed for plain GitLab calls
+    env = "production" if ref == (project.get("production") or {}).get("ref") else "staging"
+    if not (t3m_cfg(project, env).get("url") and t3m_key(project["id"], env)):
+        return
+    deadline, status = time.time() + timeout, None
+    while time.time() < deadline and not stop_event.is_set():
+        try:
+            status = gitlab(project, "GET", f"/pipelines/{pipeline_id}").get("status")
+            if status in FINAL_STATUSES:
+                break
+        except Exception as e:
+            log(f"Scan watch error in pipeline #{pipeline_id}: {e}")
+        stop_event.wait(30)
+    if status not in FINAL_STATUSES or status in ("canceled", "skipped"):
+        return                                     # nothing was deployed (or still running after the timeout)
+    log(f"Pipeline #{pipeline_id} {status}: TYPO3 health check of {project['id']} ({env})")
+    try:
+        t3m_fetch(project, env)                    # alert=True: message on failure / new errors / new updates
+    except RuntimeError:
+        pass                                       # stored as last_error and already logged / notified
 
 
 def known_host(gitlab_url):
