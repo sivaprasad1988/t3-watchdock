@@ -295,7 +295,7 @@ def version_report():
         adv = (load(t3m_history_file(p["id"], env), {"snapshots": []}).get("security") or {}).get("advisories") or []
         db, kind = db_state(d.get("db"), rel)
         web, wname, cves = web_state(d.get("webserver"), rel)
-        cells = [{**typo3_state(d.get("typo3"), adv, rel), "kind": "TYPO3"}, {**php_state(d.get("php"), rel), "kind": "PHP"},
+        cells = [{**typo3_state(d.get("typo3"), adv, rel), "kind": "TYPO3", "elts": bool(p.get("elts"))}, {**php_state(d.get("php"), rel), "kind": "PHP"},
                  {**db, "kind": kind}, {**web, "kind": wname}]
         for x in cells:
             count[x["tone"]] += 1
@@ -346,7 +346,7 @@ def task_daily_report():
     except RuntimeError as e:
         return str(e)
     sc, n = rep["site_counts"], len(rep["sites"])
-    cell = lambda x, kind=True: {"text": x["version"], "icon": x["tone"],
+    cell = lambda x, kind=True: {"text": x["version"] + (" ELTS" if x.get("elts") else ""), "icon": x["tone"],
                                  "sub": f"{x['kind']} · {x['label']}" if kind else x["label"]}
     rows = [[s["name"], s["env_label"], cell(s["cells"][0], False), cell(s["cells"][1], False),
              cell(s["cells"][2]), cell(s["cells"][3])] for s in rep["sites"]]

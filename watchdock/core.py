@@ -30,6 +30,7 @@ BEHIND_PROXY = os.environ.get("LAUNCHER_BEHIND_PROXY") == "1"
 
 
 TYPO3_API = "https://get.typo3.org/api/v1/major/{major}/release/latest"
+TYPO3_RELEASES = "https://get.typo3.org/api/v1/major/{major}/release/"   # all releases of a major, newest first, with 'elts'
 FINAL_STATUSES = ("success", "failed", "canceled", "skipped")
 MAIL_WATCH_TIMEOUT = 24 * 3600   # stop waiting for a pipeline to finish after 24 h
 MAIL_WATCH_POLL = 60

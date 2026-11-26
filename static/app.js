@@ -337,9 +337,9 @@ function cardUpdatesHtml(p) {
     if (!x?.has_data) return `<div class="upd-row">${head}<span class="sub">${x?.last_error ? "check failed" : "no data yet"}</span></div>`;
     // icon only; the full text is in the tooltip / aria-label (extensions also show their count)
     const chip = (cls, icon, tip, n) => `<span class="upd-chip ${cls}" title="${esc(tip)}" role="img" aria-label="${esc(tip)}">${ic(icon)}${n ? `<b>${n}</b>` : ""}</span>`;
-    const latest = S.typo3_latest?.[String(x.typo3 || "").split(".")[0]];
+    const t3u = t3Update(x.typo3, p);
     const chips = [
-      latest && x.typo3 && verCmp(latest, x.typo3) > 0 && chip("sev-1", "t3", `TYPO3 ${x.typo3} · update to ${latest} available`),
+      t3u.target && chip("sev-1", "t3", `TYPO3 ${x.typo3} · update to ${t3u.target}${t3u.targetElts ? " ELTS" : ""} available`),
       x.ext_updates && chip(x.ext_major ? "sev-2" : "sev-1", "puzzle", extUpdTitle(x), x.ext_updates),
       x.php_check?.severity > 0 && chip(`sev-${x.php_check.severity}`, "php", x.php_check.text),
       x.nginx_check?.severity > 0 && chip(`sev-${x.nginx_check.severity}`, "nginx", x.nginx_check.text),
@@ -370,12 +370,12 @@ async function loadT3mSummary(pre) {
       const diff = ref && ref[k] && x[k] && ref[k] !== x[k];
       return `<span class="srvtag${diff ? " diff" : ""}" title="${esc(full)}${diff ? ` (production: ${esc(ref[k])})` : ""}"><span class="h">${lbl}</span> ${diff ? "≠ " : ""}${esc(txt)}</span>`;
     }).join("");
-  const ver = (x, ref) => {
+  const ver = (x, ref, p) => {
     if (!x) return `<span class="sub">–</span>`;
     if (!x.has_data) return x.last_error ? `<span class="sev-2" title="${esc(x.last_error)}">check failed</span>` : `<span class="sub">no data yet</span>`;
-    const latest = S.typo3_latest[String(x.typo3 || "").split(".")[0]], upd = latest && x.typo3 && verCmp(latest, x.typo3) > 0;
+    const t3u = t3Update(x.typo3, p), upd = t3u.target;
     const srv = srvTags(x, ref?.has_data ? ref : null);
-    return `<b>${esc(x.typo3 || "?")}</b>${upd ? ` <span class="sev-1" title="Latest: ${esc(latest)}">↑ ${esc(latest)}</span>` : ""}
+    return `<b>${esc(x.typo3 || "?")}</b>${eltsTag(p)}${upd ? ` <span class="sev-1" title="Latest: ${esc(t3u.latest)}${t3u.targetElts ? " ELTS" : ""}">↑ ${esc(upd)}</span>` : ""}
       ${srv ? `<div class="srvtags">${srv}</div>` : ""}
       ${x.last_error ? ` <span class="sev-2" title="${esc(x.last_error)}">⚠ last check failed</span>` : ""}`;
   };
@@ -404,7 +404,7 @@ async function loadT3mSummary(pre) {
     const diff = a?.typo3 && b?.typo3 && a.typo3 !== b.typo3;
     const pdiff = a?.php && b?.php && a.php !== b.php;
     return `<tr data-pid="${esc(p.id)}" data-rank="${ranks.get(p.id)}"><td class="focus-row-number">${ranks.get(p.id)}</td><td><a href="${pUrl(p)}">${esc(p.name)}</a>${diff ? ` <span class="chip sev-1" title="Production and staging run different TYPO3 versions">versions differ</span>` : ""}${pdiff ? ` <span class="chip sev-1" title="Production and staging run different PHP versions">PHP differs</span>` : ""}</td>
-      ${[[a, ver(a)], [b, ver(b, a)]].map(([x, version]) => `<td class="${extUpdCls(x)}" title="${esc(extUpdTitle(x))}">${version}
+      ${[[a, ver(a, null, p)], [b, ver(b, a, p)]].map(([x, version]) => `<td class="${extUpdCls(x)}" title="${esc(extUpdTitle(x))}">${version}
         ${x?.has_data ? `<div class="focus-env-health">${ew(x)}</div>` : ""}</td>`).join("")}
       <td class="sub">${checked ? esc(fmt(checked)) : "–"}</td></tr>`;
   }).join("");
@@ -595,6 +595,19 @@ const SEV = {"-2":"notice", "-1":"info", "0":"ok", "1":"warning", "2":"error"};
 const sevBadge = n => `<span class="badge ${Number(n) === 0 ? "sev0" : "sev-" + Number(n)}">${esc(SEV[n] || n)}</span>`;  // CSS: sev-2 error, sev-1 warning, sev0 ok, sev--1/--2 info
 const verCmp = (a, b) => { const x = String(a).split("."), y = String(b).split(".");
   for (let i = 0; i < 3; i++) { const d = (parseInt(x[i]) || 0) - (parseInt(y[i]) || 0); if (d) return d; } return 0; };
+// "ELTS" badge next to a TYPO3 version of a project marked "Runs TYPO3 ELTS" in its settings
+const eltsTag = p => p?.elts ? ` <span class="chip elts" title="Runs TYPO3 ELTS (extended long term support)">ELTS</span>` : "";
+// TYPO3 core update for an installed version of project p. ELTS releases (paid, extended support) count as an update
+// only for a project marked "ELTS" in its settings (p.elts); others get the newest free release, the ELTS one is only a hint.
+// -> {latest, target: version to update to or null, targetElts: target is an ELTS release, eltsHint: ELTS release or null}
+function t3Update(v, p) {
+  const latest = S.typo3_latest?.[String(v || "").split(".")[0]], e = S.typo3_elts?.[String(v || "").split(".")[0]];
+  if (!latest || !v) return {latest, target: null, targetElts: false, eltsHint: null};
+  const onElts = !!p?.elts || !e?.free, eltsLatest = !!e?.elts;
+  const target = eltsLatest && !onElts ? e.free : latest;
+  return {latest, target: verCmp(target, v) > 0 ? target : null, targetElts: eltsLatest && onElts,
+          eltsHint: eltsLatest && !onElts && verCmp(latest, v) > 0 ? latest : null};
+}
 
 // Security section of an instance (result of the scheduled "PHP, nginx & security advisories" task)
 function secBody(sec) {
@@ -643,11 +656,12 @@ async function loadT3m(p, e, refreshNow) {
   const title = c?.site_name || `${p.name} – ${e.label}`;
   const failedAlert = d.last_error ? `<div class="t3alert err"><span class="t3dot"></span><div><b>Last check failed</b>
     <div class="sub">${esc(d.last_error)}${c ? " · showing the last successful check" : ""}</div></div></div>` : "";
-  if (overview) overview.innerHTML = systemOverview(d, e.env);
+  if (overview) overview.innerHTML = systemOverview(d, e.env, p);
   if (!c) { set(meta, failedAlert + `<p class="empty">No data yet. Click the refresh button.</p>`, title); return; }
   const counts = {}; c.status.forEach(x => counts[x.severity] = (counts[x.severity] || 0) + 1);
-  const major = String(c.typo3 || "").split(".")[0], latest = S.typo3_latest[major];
-  const upd = latest && c.typo3 && verCmp(latest, c.typo3) > 0;
+  const t3u = t3Update(c.typo3, p), latest = t3u.latest, upd = t3u.target;
+  const updTxt3 = upd ? `Update available: ${esc(upd)}${t3u.targetElts ? " ELTS" : ""}${t3u.eltsHint ? ` · ${esc(t3u.eltsHint)} ELTS` : ""}`
+    : t3u.eltsHint ? `Update available: ${esc(t3u.eltsHint)} ELTS` : "Latest version";
   const problems = c.status.filter(x => x.severity >= 1).sort((a, b) => b.severity - a.severity);
   const exts = Object.entries(c.extensions).filter(([, e]) => !e.local), local = Object.entries(c.extensions).filter(([, e]) => e.local);
   // Extension updates (Packagist, newest stable release compatible with this site's TYPO3 version)
@@ -685,7 +699,7 @@ async function loadT3m(p, e, refreshNow) {
   const updRows = d.updates || [];
   set(meta, `${alert}
     <div class="t3stats">
-      ${stat("TYPO3", esc(c.typo3 || "?"), latest ? (upd ? `Update available: ${esc(latest)}` : "Latest version") : "Latest unknown", latest ? (upd ? "sev-1" : "sev0") : "sub")}
+      ${stat("TYPO3", esc(c.typo3 || "?") + eltsTag(p), latest ? updTxt3 : "Latest unknown", latest ? (upd ? "sev-1" : t3u.eltsHint ? "sub" : "sev0") : "sub")}
       ${stat("Security", secStat[0], esc(secStat[1]), secStat[2])}
       ${stat("Extensions", exts.length, updExt.length ? esc(updTxt) : local.length ? `+ ${local.length} local, hidden` : "No updates", updExt.length ? "sev-1" : "sub")}
       ${stat("Unchanged since", d.since ? esc(hm(d.since)) : "–", d.since ? esc(dlong(d.since)) : "", "sub")}
@@ -719,7 +733,7 @@ async function loadT3m(p, e, refreshNow) {
   if (sl) sl.onchange = () => box.querySelectorAll("tr.local").forEach(r => r.hidden = !sl.checked);
 }
 
-function systemOverview({current, last_check, last_error}, env) {
+function systemOverview({current, last_check, last_error}, env, p) {
   const check = last_error ? `<span class="sev-2" title="${esc(last_error)}">Last check failed</span>`
     : last_check ? `Checked ${esc(fmt(last_check))}` : "";
   if (!current) return check || "No checks yet";
@@ -732,7 +746,7 @@ function systemOverview({current, last_check, last_error}, env) {
   const updT = upd.length ? `${upd.length} extension update${upd.length === 1 ? "" : "s"}${major ? ` (${major} major)` : ""} – show details` : "";
   const updChip = upd.length ? `<button type="button" class="hchip upd${major ? " major" : ""}" data-act="t3mopen" data-env="${env}" data-row="t3-exts"
       title="${updT}" aria-label="${updT}">${ic("update")}<b>${upd.length}</b></button>` : "";
-  return `<dl>${versions.map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value || "–")}</dd></div>`).join("")}</dl>
+  return `<dl>${versions.map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value || "–")}${label === "TYPO3" && value ? eltsTag(p) : ""}</dd></div>`).join("")}</dl>
     <div class="system-health">${errors || warnings
       ? [["err", "sev-2", errors, "error"], ["warn", "sev-1", warnings, "warning"]].map(([i, cls, n, w]) => {
           const t = `${n} ${w}${n === 1 ? "" : "s"}${n ? " – show details" : ""}`;
@@ -1005,6 +1019,10 @@ function viewForm(p) {
         <h2 id="project-monitoring-title">TYPO3 monitoring</h2>
         <div class="project-monitoring-grid">${T3M_ENVS.map(e => t3mFields(e, p)).join("")}</div>
       </section>
+      <div class="card"><h2 class="sec-title">TYPO3 ELTS</h2>
+        <label class="check" style="margin-bottom:12px"><input type="checkbox" name="elts" ${v.elts ? "checked" : ""}> Runs TYPO3 ELTS (extended long term support)</label>
+        <div class="hint" style="margin:-6px 0 0">Off = ELTS releases are not shown as TYPO3 updates on the card, only as a note in the TYPO3 status.</div>
+      </div>
       <div class="card"><h2 class="sec-title">GitLab pipelines</h2>
         <label class="check" style="margin-bottom:12px"><input type="checkbox" name="ci" ${v.ci !== false ? "checked" : ""}> Uses GitLab CI/CD (pipelines)</label>
         <div class="hint" data-noci style="margin:-6px 0 12px">Off = TYPO3 monitoring only: no pipelines, no TYPO3 auto-update. Path and branch are optional
@@ -1096,7 +1114,7 @@ function viewForm(p) {
   $("#pform").onsubmit = async ev => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    const body = {ci:f.get("ci") === "on", name:f.get("name"), owner:f.get("owner"), gitlab_url:f.get("gitlab_url"), path:f.get("path"), ref:f.get("ref"),
+    const body = {ci:f.get("ci") === "on", elts:f.get("elts") === "on", name:f.get("name"), owner:f.get("owner"), gitlab_url:f.get("gitlab_url"), path:f.get("path"), ref:f.get("ref"),
       variables:parseVars(f.get("variables")), auto_play:f.get("auto_play"),
       auto_enabled:f.get("auto_enabled") === "on", major:f.get("major"),
       auto_variables:parseVars(f.get("auto_variables")), auto_typo3_play:f.get("auto_typo3_play"),
@@ -1456,7 +1474,7 @@ async function viewVersions(rep) {
   const rows = sites.map(s => { const first = s.project !== prev; prev = s.project;
     return `<tr class="${first ? "vr-first" : ""}">${first ? `<td class="vr-site" rowspan="${span[s.project]}"><a href="#/p/${encodeURIComponent(s.project)}">${esc(s.name)}</a></td>` : ""}
       <td class="sub">${s.url ? `<a class="vr-site-link" href="${esc(s.url)}" target="_blank" rel="noopener" title="Open ${esc(s.url)}">${esc(s.env_label)} ${ic("ext", "sm")}</a>` : esc(s.env_label)}</td>
-      ${s.cells.map((x, i) => `<td><div class="vr-cell">${vrIc(x.tone)}<div><b>${esc(x.version)}</b>
+      ${s.cells.map((x, i) => `<td><div class="vr-cell">${vrIc(x.tone)}<div><b>${esc(x.version)}</b>${x.elts ? eltsTag({elts: true}) : ""}
         <div class="sub">${i > 1 && x.kind ? esc(x.kind) + " · " : ""}${esc(x.label)}</div></div></div></td>`).join("")}</tr>`; }).join("");
   // advisories: one collapsible row per site and environment, summary = count per severity
   const SEV_ORDER = ["Critical", "High", "Important", "Medium", "Moderate", "Not rated", "Low"];

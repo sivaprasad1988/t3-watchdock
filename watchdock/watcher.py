@@ -5,9 +5,9 @@ import threading
 import time
 import urllib.request
 
-from .core import FINAL_STATUSES, MAIL_WATCH_POLL, MAIL_WATCH_TIMEOUT, TYPO3_API, config, log, notify, now, stop_event
+from .core import FINAL_STATUSES, MAIL_WATCH_POLL, MAIL_WATCH_TIMEOUT, TYPO3_API, TYPO3_RELEASES, config, log, notify, now, stop_event
 from .alerts import notify_event
-from .db import (kv_set, mail_watch_add, mail_watch_done, mail_watches, typo3_announce, typo3_latest_merge,
+from .db import (kv_get, kv_set, mail_watch_add, mail_watch_done, mail_watches, typo3_announce, typo3_latest_merge,
                  typo3_seen, typo3_seen_set, user_token)
 from .gitlab import as_user, find_project, gitlab, run_pipeline
 
@@ -72,6 +72,14 @@ def latest_typo3(major):
         return json.load(r)["version"]
 
 
+def elts_typo3(major):
+    """{'elts': latest release is ELTS-only, 'free': newest release that is not ELTS (None if there is none)}."""
+    with urllib.request.urlopen(TYPO3_RELEASES.format(major=int(major)), timeout=30) as r:
+        rel = json.load(r)
+    free = next((x["version"] for x in rel if not x.get("elts")), None)
+    return {"elts": bool(rel and rel[0].get("elts")), "free": free}
+
+
 def announce_update(due):
     """Before the staging pipelines start: one message per new version (once per project and version)."""
     new = set(typo3_announce([(p["id"], v) for p, _, v in due]))
@@ -90,13 +98,17 @@ def announce_update(due):
 def check_typo3():
     """Returns (projects with auto-update, list of errors). Errors make the scheduler run count as failed."""
     projects = [p for p in config()["projects"] if p.get("auto_typo3", {}).get("enabled") and p.get("ci") is not False]
-    latest, errors = {}, []
+    latest, errors, elts = {}, [], {}
     for major in sorted({int(p["auto_typo3"]["major"]) for p in projects}):
         try:
             latest[major] = latest_typo3(major)
         except Exception as e:
             log(f"TYPO3 {major} check failed: {e}")
             errors.append(f"TYPO3 {major} check failed: {e}")
+        try:
+            elts[str(major)] = elts_typo3(major)
+        except Exception as e:                      # UI hint only: keep the last known value, no run error
+            log(f"TYPO3 {major} ELTS check failed: {e}")
 
     due = []                                   # (project, previous version, new version)
     for p in projects:
@@ -151,4 +163,5 @@ def check_typo3():
     kv_set("last_check", now())
     # keep the last known version of a major whose check failed (used for the update hint in the UI)
     typo3_latest_merge(latest)
+    kv_set("typo3_elts", {**(kv_get("typo3_elts") or {}), **elts})
     return projects, errors

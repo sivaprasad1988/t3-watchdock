@@ -35,6 +35,7 @@ def build_project(b, pid=None):
         "name": name or path,
         "owner": owner,
         "ci": ci,
+        "elts": bool(b.get("elts")),             # site runs TYPO3 ELTS: ELTS releases count as TYPO3 updates in the UI
         "gitlab_url": (b.get("gitlab_url") or "https://gitlab.gingco.de").strip().rstrip("/"),
         "path": path,
         "ref": ref,
@@ -137,7 +138,7 @@ def _import_entry(entry):
     auto, prod = p.get("auto_typo3") or {}, p.get("production") or {}
     if not all(isinstance(x, dict) for x in (auto, prod, secrets)):
         raise RuntimeError(f"{pid}: invalid project data")
-    b = {"name": p.get("name"), "path": p.get("path"), "ref": p.get("ref"), "ci": p.get("ci", True),
+    b = {"name": p.get("name"), "path": p.get("path"), "ref": p.get("ref"), "ci": p.get("ci", True), "elts": p.get("elts", False),
          "gitlab_url": p.get("gitlab_url"), "variables": _str_map(p.get("variables"), f"{pid}: variables"),
          "auto_play": p.get("auto_play"), "auto_enabled": auto.get("enabled"), "major": auto.get("major"),
          "auto_variables": _str_map(auto.get("variables"), f"{pid}: TYPO3 update variables"),

@@ -176,6 +176,7 @@ def state():
         "t3monitor_staging_auth": [p["id"] for p in cfg["projects"] if t3m_auth_password(p["id"], "staging")],
         "last_check": db.kv_get("last_check"),
         "typo3_latest": db.typo3_latest(),
+        "typo3_elts": db.kv_get("typo3_elts") or {},
         "typo3_seen": db.typo3_seen(),
         "typo3_security": {k: (db.kv_get("typo3_security") or {}).get(k) for k in ("checked", "items")},
         "runs": db.runs_recent(30),
